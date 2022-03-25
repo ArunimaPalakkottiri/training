@@ -1,0 +1,181 @@
+mysql -u bhaskaramuvvalatigeranaly -pbhaskaramuvvalatigeranalyedro4 -h sqoopdb.slbdh.cloudlabs.com
+
+
+
+use bhaskaramuvvalatigeranaly;
+
+
+create table STOCK_PRICES(Trading_date date, Symbol text,Open double,Close double , Low double, High double ,Volume int);
+
+
+create table STOCK_COMPANIES(Symbol text,Company_name text, Sector text, Sub_industry text , Headquarter text);
+
+
+
+
+sqoop import --connect jdbc:mysql://sqoopdb.slbdh.cloudlabs.com/bhaskaramuvvalatigeranaly --username bhaskaramuvvalatigeranaly --password bhaskaramuvvalatigeranalyedro4  --table STOCK_COMPANIES --target-dir /user/bhaskaramuvvalatigeranaly/BDHSPROJECT/Stockcompanies --columns "Symbol,Company_name,Sector,Sub_industry,Headquarter" -m 1
+
+
+
+load data local infile '/mnt/home/bhaskaramuvvalatigeranaly/StockPrices.csv' into table STOCK_PRICES FIELDS TERMINATED BY ','  LINES TERMINATED BY '\n'; 
+
+select count(*) from STOCK_PRICES;
+
+load data local infile '/mnt/home/bhaskaramuvvalatigeranaly/Stockcompanies.csv' into table STOCK_COMPANIES FIELDS TERMINATED BY ','  LINES TERMINATED BY '\n';
+
+
+select count(*) from STOCK_COMPANIES;
+
+
+
+
+
+sqoop import --connect jdbc:mysql://sqoopdb.slbdh.cloudlabs.com/bhaskaramuvvalatigeranaly --username bhaskaramuvvalatigeranaly --password bhaskaramuvvalatigeranalyedro4 --table STOCK_PRICES --target-dir /user/bhaskaramuvvalatigeranaly/BDHSPROJECT/StockPrices --columns "Trading_date,Symbol,Open,Close,Low,High,Volume" -m 1
+
+sqoop import --connect jdbc:mysql://sqoopdb.slbdh.cloudlabs.com/bhaskaramuvvalatigeranaly --username bhaskaramuvvalatigeranaly --password bhaskaramuvvalatigeranalyedro4 --table STOCK_COMPANIES --target-dir /user/bhaskaramuvvalatigeranaly/BDHSPROJECT/Stockcompanies --columns "Symbol,Company_name,Sector,Sub_industry,Headquarter" -m 1
+
+HIVE
+=====
+
+
+use bhaskardemo;
+
+
+create table stock_prices(
+Trading_date date,Symbol string,Open double,Close double,Low double,High double,Volume int)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+LOCATION '/user/bhaskaramuvvalatigeranaly/BDHSPROJECT/StockPrices';
+
+LOAD DATA INPATH '/user/bhaskaramuvvalatigeranaly/BDHSPROJECT/StockPrices' INTO TABLE stock_prices;
+
+select count(*) from STOCK_PRICES;
+
+
+
+
+
+create table stock_companies12(Symbol string,Company_name string,Sector string,Sub_industry string,Headquarter string)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+LOCATION '/user/bhaskaramuvvalatigeranaly/BDHSPROJECT/Stockcompanies';
+
+
+LOAD DATA INPATH '/user/bhaskaramuvvalatigeranaly/BDHSPROJECT/Stockcompanies' INTO TABLE stock_companies12;
+
+select count(*) from stock_companies12;
+
+
+
+
+
+create table stockanalysis as select trading_year,trading_month,sc.Symbol,Company_name,
+trim(split(Headquarter,"\;")[1]) State,Sector,Sub_industry,Open,Close,Low,High,Volume
+from stock_companies12 sc,
+(select Symbol,Year(Trading_date) Trading_year,Month(Trading_date) Trading_month,Round(avg(Open),2) Open,
+Round(avg(Close),2) Close, Round(avg(Low),2) Low,Round(avg(High),2) High,Round(avg(Volume),2) Volume from stock_prices 
+group by symbol,Month(Trading_date),Year(Trading_date)) sp
+where sc.Symbol=sp.Symbol;
+
+
+
+
+select * from stockanalysis limit 10;
+
+
+
+
+
+create table company_trading as
+select Company_name,min(Trading_year) min_year,max(Trading_year) max_year,min(Trading_year) min_month,max(Trading_year) max_month
+from stockanalysis
+group by Company_name;
+
+
+select * from company_trading limit 5;
+
+
+
+
+
+
+select Trading_start.Company_name,((close-open)/open)*100 Growth_percent 
+from(select ct.Company_name,Open from stockanalysis sa, company_trading ct
+where sa.Trading_year=ct.min_year and sa.Trading_month=ct.min_month and sa.Company_name=ct.Company_name) Trading_start,(select ct.Company_name,Close from stockanalysis sa, company_trading ct
+where sa.Trading_year=ct.max_year and sa.Trading_month=ct.max_month and sa.Company_name=ct.Company_name) Trading_end where Trading_start.Company_name=Trading_end.Company_name sort by growth_percent desc limit 5;
+
+
+
+select * from company_trading limit 5;
+
+
+create table stock_table2 as select state, sub_industry, stock_start.company_name, ((stock_end.close-stock_start.open)/stock_start.open)*100 growth_percent
+from (select t1.company_name,open
+from stockanalysis sd, company_trading t1
+where sd.trading_year=t1.min_year and sd.trading_month=t1.min_month and
+sd.company_name=t1.company_name)stock_start,
+(select t1.company_name, close
+from stockanalysis sd, company_trading t1 where sd.trading_year=t1.max_year and sd.trading_month=t1.max_month and sd.company_name=t1.company_name)stock_end,
+(select company_name, state, sub_industry
+from stockanalysis
+group by company_name,state,sub_industry)sd
+where (stock_end.close-stock_start.open)>0 and
+stock_start.company_name=stock_end.company_name and sd.company_name=stock_start.company_name;
+
+
+create table stock_table4 as select open.sector, open.trading_year,
+(close-open) growth from (select sector,trading_year,avg(open) open from stockanalysis where trading_month = 1 group by sector,trading_year) open, (select sector,trading_year,avg(close) close from stockanalysis
+where trading_month=12 group by sector,trading_year) close
+where open.sector = close.sector and open.trading_year = close.trading_year;
+
+
+
+select * from stock_table4 limit 5;
+
+
+
+select x.sector,x.trading_year,x.growth from stock_table4 x,
+(select sector,min(growth) growth from stock_table4 group by sector) y where x.sector=y.sector and x.growth=y.growth;
+
+
+
+
+
+
+select a.sector,a.trading_year,a.growth from stock_table4 a,(select sector,max(growth) growth from stock_table4  group by sector) b where a.sector=b.sector and a.growth=b.growth;
+
+
+
+
+
+
+
+
+
+select x.sector,x.trading_year,x.growth
+from stock_table4  x,
+(select sector,round(avg(growth),0) growth from stock_table4  group by sector) y
+where x.sector=y.sector and x.growth=y.growth;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
